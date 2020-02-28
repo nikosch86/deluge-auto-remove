@@ -100,7 +100,7 @@ for id in TORRENTS:
         LOGGER.debug("seeding time {:0>8}".format(str(timedelta(seconds=torrent['seeding_time']))))
 
         if vars(ARGS).get('dry_run'):
-            LOGGER.info("[dry-run] _not_ removing torrent (with data) by id '{}'".format(id))
+            LOGGER.info("[dry-run] _NOT_ removing torrent (with data) by id '{}'".format(id))
         else:
             LOGGER.info("removing torrent (with data) by id '{}'".format(id))
             removed = convert(CLIENT.call('core.remove_torrent', id, True))
