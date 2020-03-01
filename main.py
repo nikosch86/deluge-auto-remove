@@ -24,6 +24,10 @@ ARGPARSER.add_argument("--days", "-d", \
     default=25, \
     help="delete torrents seeding for more than this amount of days (default: %(default)s)", \
     type=int)
+ARGPARSER.add_argument("--ratio", "-r", \
+    default='auto', \
+    help="delete torrents with a ratio equal greater than specified \
+        (auto means compare to stop_ratio configured for torrent) (default: %(default)s)")
 ARGPARSER.add_argument("--keep-label", "-l", \
     default="keep", \
     help="ignore torrents with this label (default: %(default)s)")
@@ -41,6 +45,7 @@ coloredlogs.install(level=LEVEL)
 
 KEEP_LABEL = ARGS.keep_label
 SEEDING_DAYS = ARGS.days
+RATIO = ARGS.ratio
 
 def cleanup_and_die(msg):
     """
@@ -67,6 +72,19 @@ def convert(data):
     if isinstance(data, tuple):
         return map(convert, data)
     return data
+
+def remove(torrent_id):
+    """
+    remove torrent by id
+    """
+    if vars(ARGS).get('dry_run'):
+        LOGGER.info("[dry-run] _NOT_ removing torrent (with data) by id '{}'".format(torrent_id))
+    else:
+        LOGGER.info("removing torrent (with data) by id '{}'".format(torrent_id))
+        removed = convert(CLIENT.call('core.remove_torrent', torrent_id, True))
+        if removed is not True:
+            cleanup_and_die("something went wrong removing '{}'".format(removed))
+    LOGGER.debug("successfully removed torrent with data")
 
 try:
     from deluge_client import DelugeRPCClient
@@ -98,12 +116,25 @@ for id in TORRENTS:
         LOGGER.debug(torrent)
         LOGGER.debug("torrent added '{}'".format(time.ctime(torrent['time_added'])))
         LOGGER.debug("seeding time {:0>8}".format(str(timedelta(seconds=torrent['seeding_time']))))
-
-        if vars(ARGS).get('dry_run'):
-            LOGGER.info("[dry-run] _NOT_ removing torrent (with data) by id '{}'".format(id))
-        else:
-            LOGGER.info("removing torrent (with data) by id '{}'".format(id))
-            removed = convert(CLIENT.call('core.remove_torrent', id, True))
-            if removed is not True:
-                cleanup_and_die("something went wrong removing '{}'".format(removed))
-        LOGGER.debug("successfully removed torrent with data")
+        remove(id)
+        continue
+    if RATIO != 'auto':
+        if torrent['ratio'] > float(RATIO) and float(RATIO) > -1:
+            LOGGER.info("torrent '{}' surpassed minimum ratio ({} > {})".\
+                format(torrent['name'], torrent['ratio'], RATIO))
+            LOGGER.debug(torrent)
+            remove(id)
+            continue
+    elif RATIO == 'auto' and torrent['ratio'] > torrent['stop_ratio']:
+        if torrent['stop_at_ratio'] is True:
+            LOGGER.info("torrent '{}' surpassed stop_ratio ({} > {})".\
+                format(torrent['name'], torrent['ratio'], torrent['stop_ratio']))
+            LOGGER.debug(torrent)
+            remove(id)
+            continue
+        if torrent['stop_at_ratio'] is not True:
+            LOGGER.debug("torrent '{}' surpassed stop_ratio ({} > {}) \
+                but stop_at_ratio is set to {}".\
+                format(torrent['name'], torrent['ratio'], \
+                    torrent['stop_ratio'], torrent['stop_at_ratio']))
+            LOGGER.debug(torrent)
