@@ -100,9 +100,11 @@ else:
     LOGGER.warning(CLIENT)
     cleanup_and_die("failed to connect")
 
-TORRENTS = convert(CLIENT.call('core.get_torrents_status', {'state': 'Seeding'}, {}))
+TORRENTS = convert(CLIENT.call('core.get_torrents_status', {}, {}))
 
 for id in TORRENTS:
+    if TORRENTS[id]['state'] != 'Seeding' and TORRENTS[id]['state'] != 'Paused':
+        continue
     if TORRENTS[id]['label'] == KEEP_LABEL:
         continue
     if TORRENTS[id]['is_finished'] is not True:
@@ -134,7 +136,7 @@ for id in TORRENTS:
             continue
         if torrent['stop_at_ratio'] is not True:
             LOGGER.debug("torrent '{}' surpassed stop_ratio ({} > {}) \
-                but stop_at_ratio is set to {}".\
+but stop_at_ratio is set to {}".\
                 format(torrent['name'], torrent['ratio'], \
                     torrent['stop_ratio'], torrent['stop_at_ratio']))
             LOGGER.debug(torrent)
