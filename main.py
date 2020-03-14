@@ -112,8 +112,9 @@ TORRENTS = convert(CLIENT.call('core.get_torrents_status', {}, {}))
 for id in TORRENTS:
     if TORRENTS[id]['state'] != 'Seeding' and TORRENTS[id]['state'] != 'Paused':
         continue
-    if TORRENTS[id]['label'] == KEEP_LABEL:
-        continue
+    if 'label' in TORRENTS[id]:
+        if TORRENTS[id]['label'] == KEEP_LABEL:
+            continue
     if TORRENTS[id]['is_finished'] is not True:
         continue
     torrent = TORRENTS[id]
