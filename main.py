@@ -93,7 +93,14 @@ except ImportError:
 
 CLIENT = DelugeRPCClient(ARGS.host, int(ARGS.port), ARGS.user, ARGS.password)
 
-CLIENT.connect()
+try:
+    CLIENT.connect()
+except Exception as failed_custom_exception_message:
+    if 'BadLoginError' in str(failed_custom_exception_message):
+        cleanup_and_die("wrong password supplied")
+    else:
+        cleanup_and_die(failed_custom_exception_message)
+
 if CLIENT.connected is True:
     LOGGER.debug("successfully connected to deluge")
 else:
