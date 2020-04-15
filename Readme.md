@@ -1,4 +1,4 @@
-# Deluge Torrent Remover based on Seed time
+# Deluge Torrent Remover based on Seed time and/or Ratio
 
 This script uses the deluge-client library to get the torrent list.  
 Torrents that have been seeding longer than the configured amount of days  
