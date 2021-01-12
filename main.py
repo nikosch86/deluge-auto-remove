@@ -37,6 +37,12 @@ ARGPARSER.add_argument("--verbose", "-v", \
 ARGPARSER.add_argument("--dry-run", \
     help="dry run, do not actually remove torrents", \
     action="store_true")
+ARGPARSER.add_argument("--keep-data", \
+    help="remove torrent but keep the downloaded data", \
+    action="store_true")
+ARGPARSER.add_argument("--remove-error", \
+    help="remove torrents that are in error state", \
+    action="store_true")
 ARGS = ARGPARSER.parse_args()
 
 LEVELS = [logging.WARNING, logging.INFO, logging.DEBUG]
@@ -46,6 +52,8 @@ coloredlogs.install(level=LEVEL)
 KEEP_LABEL = ARGS.keep_label
 SEEDING_DAYS = ARGS.days
 RATIO = ARGS.ratio
+KEEP_DATA = ARGS.keep_data
+REMOVE_ERROR = ARGS.remove_error
 
 def cleanup_and_die(msg):
     """
@@ -66,7 +74,7 @@ def convert(data):
     convert bytes, dict tuples
     """
     if isinstance(data, bytes):
-        return data.decode('ascii')
+        return data.decode('utf_8')
     if isinstance(data, dict):
         return dict(map(convert, data.items()))
     if isinstance(data, tuple):
@@ -78,13 +86,14 @@ def remove(torrent_id):
     remove torrent by id
     """
     if vars(ARGS).get('dry_run'):
-        LOGGER.info("[dry-run] _NOT_ removing torrent (with data) by id '{}'".format(torrent_id))
+        torrent_data_message = '' if KEEP_DATA else ' (with data)'
+        LOGGER.info("[dry-run] _NOT_ removing torrent{} by id '{}'".format(torrent_data_message, torrent_id))
     else:
-        LOGGER.info("removing torrent (with data) by id '{}'".format(torrent_id))
-        removed = convert(CLIENT.call('core.remove_torrent', torrent_id, True))
+        LOGGER.info("removing torrent{} by id '{}'".format(torrent_data_message, torrent_id))
+        removed = convert(CLIENT.call('core.remove_torrent', torrent_id, not KEEP_DATA))
         if removed is not True:
             cleanup_and_die("something went wrong removing '{}'".format(removed))
-    LOGGER.debug("successfully removed torrent with data")
+    LOGGER.debug("successfully removed torrent{}".format(torrent_data_message))
 
 try:
     from deluge_client import DelugeRPCClient
@@ -110,7 +119,10 @@ else:
 TORRENTS = convert(CLIENT.call('core.get_torrents_status', {}, {}))
 
 for id in TORRENTS:
-    if TORRENTS[id]['state'] != 'Seeding' and TORRENTS[id]['state'] != 'Paused':
+    ignore_torrent = TORRENTS[id]['state'] != 'Seeding' and TORRENTS[id]['state'] != 'Paused'
+    if REMOVE_ERROR:
+        ignore_torrent = ignore_torrent and TORRENTS[id]['state'] != 'Error'
+    if ignore_torrent:
         continue
     if 'label' in TORRENTS[id]:
         if TORRENTS[id]['label'] == KEEP_LABEL:
