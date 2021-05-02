@@ -85,9 +85,10 @@ def remove(torrent_id):
     """
     remove torrent by id
     """
+    torrent_data_message = '' if KEEP_DATA else ' (with data)'
     if vars(ARGS).get('dry_run'):
-        torrent_data_message = '' if KEEP_DATA else ' (with data)'
-        LOGGER.info("[dry-run] _NOT_ removing torrent{} by id '{}'".format(torrent_data_message, torrent_id))
+        LOGGER.info("[dry-run] _NOT_ removing torrent{} by id '{}'"\
+          .format(torrent_data_message, torrent_id))
     else:
         LOGGER.info("removing torrent{} by id '{}'".format(torrent_data_message, torrent_id))
         removed = convert(CLIENT.call('core.remove_torrent', torrent_id, not KEEP_DATA))
