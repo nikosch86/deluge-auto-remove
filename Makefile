@@ -1,4 +1,4 @@
-.PHONY: install install-dev test coverage lint clean
+.PHONY: install install-dev test coverage lint pylint clean
 
 PYTHON ?= python3
 PIP ?= $(PYTHON) -m pip
@@ -17,6 +17,9 @@ coverage:
 
 lint:
 	$(PYTHON) -m ruff check .
+
+pylint:
+	$(PYTHON) -m pylint main.py tests/
 
 clean:
 	rm -rf .pytest_cache .coverage __pycache__ tests/__pycache__

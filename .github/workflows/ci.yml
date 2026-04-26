@@ -24,8 +24,11 @@ jobs:
       - name: Install dev dependencies
         run: make install-dev
 
-      - name: Lint
+      - name: Lint (ruff)
         run: make lint
 
-      - name: Test
-        run: make test
+      - name: Lint (pylint)
+        run: make pylint
+
+      - name: Test + coverage
+        run: make coverage
