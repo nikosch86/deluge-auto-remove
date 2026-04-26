@@ -1,0 +1,107 @@
+name: Binary
+
+on:
+  push:
+    branches: [master]
+    tags: ['v*.*.*']
+  pull_request:
+    branches: [master]
+  workflow_dispatch:
+
+permissions:
+  contents: write  # needed for the release step on tag push
+
+jobs:
+  build:
+    name: Build (${{ matrix.os }} / ${{ matrix.arch }})
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: linux
+            arch: amd64
+            runner: ubuntu-latest
+            artifact: deluge-remover-linux-amd64
+            binary: deluge-remover
+          - os: linux
+            arch: arm64
+            runner: ubuntu-24.04-arm
+            artifact: deluge-remover-linux-arm64
+            binary: deluge-remover
+          - os: macos
+            arch: arm64
+            runner: macos-latest
+            artifact: deluge-remover-macos-arm64
+            binary: deluge-remover
+          - os: macos
+            arch: amd64
+            runner: macos-13
+            artifact: deluge-remover-macos-amd64
+            binary: deluge-remover
+          - os: windows
+            arch: amd64
+            runner: windows-latest
+            artifact: deluge-remover-windows-amd64
+            binary: deluge-remover.exe
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install runtime deps and PyInstaller
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt pyinstaller
+
+      - name: Build binary
+        run: pyinstaller --onefile --name deluge-remover main.py
+
+      - name: Smoke test binary (--help)
+        shell: bash
+        run: dist/${{ matrix.binary }} --help
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: dist/${{ matrix.binary }}
+          if-no-files-found: error
+
+  release:
+    name: Attach binaries to release
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Repack each artifact for release
+        run: |
+          set -euo pipefail
+          mkdir -p release
+          cd artifacts
+          for dir in */; do
+            name="${dir%/}"
+            cd "$dir"
+            if [[ "$name" == *windows* ]]; then
+              zip -j "../../release/${name}.zip" *
+            else
+              tar -czf "../../release/${name}.tar.gz" *
+            fi
+            cd ..
+          done
+
+      - name: Create / update release
+        uses: softprops/action-gh-release@c062e08bd532815e2082a85e87e3ef29c3e6d191 # v2.0.8
+        with:
+          files: release/*
+          fail_on_unmatched_files: true

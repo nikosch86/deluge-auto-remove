@@ -53,7 +53,19 @@ docker run --rm \
   remover --days 7 --dry-run
 ```
 
-The image runs as a non-root user and uses Python 3.12-slim.
+The image runs as a non-root user and uses Python 3.12-slim. CI publishes
+multi-arch images (`linux/amd64`, `linux/arm64`) to
+`ghcr.io/<owner>/<repo>` on every push to `master` and on `v*.*.*` tags.
+
+## Standalone binaries
+
+CI also builds standalone PyInstaller binaries for every push and PR
+(uploaded as workflow artifacts). On `v*.*.*` tags they are attached to
+the corresponding GitHub Release. Targets:
+
+- Linux: `amd64`, `arm64`
+- macOS: `arm64` (Apple Silicon), `amd64` (Intel)
+- Windows: `amd64`
 
 ## Development
 
