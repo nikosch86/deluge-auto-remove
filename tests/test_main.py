@@ -25,6 +25,7 @@ class FakeDelugeRPCClient:
         self.connect_exception = None
         self.torrents = {}
         self.removed = []
+        self.remove_responses = {}
         FakeDelugeRPCClient.instances.append(self)
 
     def connect(self):
@@ -36,7 +37,13 @@ class FakeDelugeRPCClient:
         if method == "core.get_torrents_status":
             return self.torrents
         if method == "core.remove_torrent":
+            torrent_id = args[0]
             self.removed.append(args)
+            override = self.remove_responses.get(torrent_id)
+            if isinstance(override, Exception):
+                raise override
+            if override is not None:
+                return override
             return True
         raise AssertionError(f"unexpected method {method}")
 
@@ -47,12 +54,20 @@ def reset_fake():
     yield
 
 
+class FakeRemoteException(Exception):
+    pass
+
+
 @pytest.fixture
 def fake_deluge_client(monkeypatch):
     """Install a fake `deluge_client` module so main()'s lazy import picks it up."""
     fake_module = types.ModuleType("deluge_client")
+    fake_client_submodule = types.ModuleType("deluge_client.client")
     fake_module.DelugeRPCClient = FakeDelugeRPCClient
+    fake_client_submodule.RemoteException = FakeRemoteException
+    fake_module.client = fake_client_submodule
     monkeypatch.setitem(sys.modules, "deluge_client", fake_module)
+    monkeypatch.setitem(sys.modules, "deluge_client.client", fake_client_submodule)
     monkeypatch.setattr(main_module.coloredlogs, "install", lambda **kwargs: None)
     return fake_module
 
@@ -81,9 +96,11 @@ def test_main_connect_failure_exits(fake_deluge_client, monkeypatch):
 
 
 def test_main_bad_login_exits(fake_deluge_client, monkeypatch, caplog):
+    bad_login_cls = type("BadLoginError", (FakeRemoteException,), {})
+
     def make_failing_client(*args, **kwargs):
         client = FakeDelugeRPCClient(*args, **kwargs)
-        client.connect_exception = RuntimeError("BadLoginError raised")
+        client.connect_exception = bad_login_cls("login rejected")
         return client
 
     monkeypatch.setattr(fake_deluge_client, "DelugeRPCClient", make_failing_client)
@@ -91,6 +108,21 @@ def test_main_bad_login_exits(fake_deluge_client, monkeypatch, caplog):
         with pytest.raises(SystemExit):
             main_module.main(CONNECT_ARGS)
     assert "wrong password" in caplog.text
+
+
+def test_main_other_remote_exception_exits(fake_deluge_client, monkeypatch, caplog):
+    other_cls = type("SomeOtherError", (FakeRemoteException,), {})
+
+    def make_failing_client(*args, **kwargs):
+        client = FakeDelugeRPCClient(*args, **kwargs)
+        client.connect_exception = other_cls("daemon refused")
+        return client
+
+    monkeypatch.setattr(fake_deluge_client, "DelugeRPCClient", make_failing_client)
+    with caplog.at_level(logging.CRITICAL):
+        with pytest.raises(SystemExit):
+            main_module.main(CONNECT_ARGS)
+    assert "daemon refused" in caplog.text
 
 
 def _seeded_client_factory(torrents):
@@ -238,6 +270,47 @@ def test_main_removes_via_stop_ratio_when_enabled(fake_deluge_client, monkeypatc
     main_module.main(CONNECT_ARGS + ["-v"])
     client = FakeDelugeRPCClient.instances[-1]
     assert client.removed == [("id-x", True)]
+
+
+def test_main_continues_after_failed_removal(fake_deluge_client, monkeypatch, caplog):
+    torrents = {
+        b"id-bad": {
+            "name": "bad.torrent",
+            "state": "Seeding",
+            "label": "",
+            "is_finished": True,
+            "seeding_time": 30 * 86400,
+            "ratio": 0.0,
+            "stop_ratio": 99.0,
+            "stop_at_ratio": False,
+            "time_added": 0,
+        },
+        b"id-good": {
+            "name": "good.torrent",
+            "state": "Seeding",
+            "label": "",
+            "is_finished": True,
+            "seeding_time": 30 * 86400,
+            "ratio": 0.0,
+            "stop_ratio": 99.0,
+            "stop_at_ratio": False,
+            "time_added": 0,
+        },
+    }
+
+    def factory(*args, **kwargs):
+        client = FakeDelugeRPCClient(*args, **kwargs)
+        client.torrents = torrents
+        client.remove_responses = {"id-bad": RuntimeError("daemon hated it")}
+        return client
+
+    monkeypatch.setattr(fake_deluge_client, "DelugeRPCClient", factory)
+    with caplog.at_level(logging.ERROR):
+        main_module.main(CONNECT_ARGS + ["--days", "10"])
+    client = FakeDelugeRPCClient.instances[-1]
+    # Both torrents were attempted; the bad one didn't abort the run.
+    assert {call[0] for call in client.removed} == {"id-bad", "id-good"}
+    assert "daemon hated it" in caplog.text
 
 
 def test_main_keeps_when_label_matches(fake_deluge_client, monkeypatch):

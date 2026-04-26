@@ -97,8 +97,30 @@ def test_remove_keep_data_passes_false():
     assert client.calls == [("core.remove_torrent", ("abc", False))]
 
 
-def test_remove_failure_exits():
+def test_remove_failure_returns_false_and_logs(caplog):
     client = FakeClient(response=b"some error")
-    with pytest.raises(SystemExit) as exc_info:
-        remove(client, "abc", keep_data=False, dry_run=False)
-    assert exc_info.value.code == 2
+    with caplog.at_level(logging.ERROR):
+        result = remove(client, "abc", keep_data=False, dry_run=False)
+    assert result is False
+    assert "abc" in caplog.text
+
+
+def test_remove_exception_returns_false_and_logs(caplog):
+    class ExplodingClient:
+        def call(self, *args, **kwargs):
+            raise RuntimeError("boom")
+
+    with caplog.at_level(logging.ERROR):
+        result = remove(ExplodingClient(), "abc", keep_data=False, dry_run=False)
+    assert result is False
+    assert "boom" in caplog.text
+
+
+def test_remove_success_returns_true():
+    client = FakeClient(response=True)
+    assert remove(client, "abc", keep_data=False, dry_run=False) is True
+
+
+def test_remove_dry_run_returns_true():
+    client = FakeClient()
+    assert remove(client, "abc", keep_data=False, dry_run=True) is True

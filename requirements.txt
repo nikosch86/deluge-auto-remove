@@ -1,2 +1,2 @@
-deluge-client
-coloredlogs
+deluge-client==1.9.0
+coloredlogs==15.0.1

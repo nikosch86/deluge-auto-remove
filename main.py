@@ -89,7 +89,7 @@ def should_remove(torrent, seeding_days, ratio, keep_label, remove_error):
     if torrent.get('label') == keep_label:
         return (False, None)
 
-    if torrent.get('is_finished') is not True:
+    if not torrent.get('is_finished'):
         return (False, None)
 
     seeding = torrent.get('seeding_time', 0) // (60 * 60 * 24)
@@ -103,7 +103,7 @@ def should_remove(torrent, seeding_days, ratio, keep_label, remove_error):
         return (False, None)
 
     if torrent.get('ratio', 0) > torrent.get('stop_ratio', float('inf')):
-        if torrent.get('stop_at_ratio') is True:
+        if torrent.get('stop_at_ratio'):
             return (True, 'stop_ratio')
         return (False, 'stop_ratio_ignored')
 
@@ -111,17 +111,28 @@ def should_remove(torrent, seeding_days, ratio, keep_label, remove_error):
 
 
 def remove(client, torrent_id, keep_data, dry_run):
-    """Remove a torrent by id (or just log it during a dry run)."""
+    """Remove a torrent by id (or just log it during a dry run).
+
+    Returns True on success (or dry-run skip), False on failure. Failures
+    are logged but never abort the caller — one bad torrent must not stop
+    the rest of the sweep.
+    """
     torrent_data_message = '' if keep_data else ' (with data)'
     if dry_run:
         LOGGER.info("[dry-run] _NOT_ removing torrent%s by id '%s'",
             torrent_data_message, torrent_id)
-        return
+        return True
     LOGGER.info("removing torrent%s by id '%s'", torrent_data_message, torrent_id)
-    removed = convert(client.call('core.remove_torrent', torrent_id, not keep_data))
+    try:
+        removed = convert(client.call('core.remove_torrent', torrent_id, not keep_data))
+    except Exception as exc:  # pylint: disable=broad-exception-caught
+        LOGGER.error("failed to remove torrent '%s': %s", torrent_id, exc)
+        return False
     if removed is not True:
-        cleanup_and_die(f"something went wrong removing '{removed}'")
+        LOGGER.error("failed to remove torrent '%s': %s", torrent_id, removed)
+        return False
     LOGGER.debug("successfully removed torrent%s", torrent_data_message)
+    return True
 
 
 def _log_torrent_decision(torrent, reason, args):
@@ -166,6 +177,7 @@ def _connect(args):
     # pylint: disable=import-outside-toplevel
     try:
         from deluge_client import DelugeRPCClient
+        from deluge_client.client import RemoteException
     except ImportError:
         cleanup_and_die("please install the DelugeRPCClient library 'pip install -U deluge-client'")
 
@@ -174,13 +186,16 @@ def _connect(args):
 
     try:
         client.connect()
-    except Exception as exc:  # pylint: disable=broad-exception-caught
-        if 'BadLoginError' in str(exc):
+    except RemoteException as exc:
+        # BadLoginError is created dynamically from the wire protocol, so we
+        # match on the runtime class name rather than the message text.
+        if type(exc).__name__ == 'BadLoginError':
             cleanup_and_die("wrong password supplied")
-        else:
-            cleanup_and_die(exc)
+        cleanup_and_die(exc)
+    except Exception as exc:  # pylint: disable=broad-exception-caught
+        cleanup_and_die(exc)
 
-    if client.connected is True:
+    if client.connected:
         LOGGER.debug("successfully connected to deluge")
     else:
         LOGGER.warning(client)
