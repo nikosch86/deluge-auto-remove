@@ -36,7 +36,7 @@ jobs:
             binary: deluge-remover
           - os: macos
             arch: amd64
-            runner: macos-13
+            runner: macos-15-intel
             artifact: deluge-remover-macos-amd64
             binary: deluge-remover
           - os: windows
