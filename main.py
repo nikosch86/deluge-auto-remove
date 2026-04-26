@@ -15,6 +15,7 @@ LOGGER = logging.getLogger(__name__)
 
 
 def build_argparser():
+    """Build the CLI argument parser."""
     parser = argparse.ArgumentParser()
     parser.add_argument("--host",
         default=os.environ.get('DELUGE_HOST'),
@@ -55,17 +56,13 @@ def build_argparser():
 
 
 def cleanup_and_die(msg):
-    """
-    cleanup and messages, then exit
-    """
+    """Log a critical message and exit with status 2."""
     LOGGER.critical(msg)
     sys.exit(2)
 
 
 def convert(data):
-    """
-    convert bytes, dict tuples
-    """
+    """Recursively decode bytes inside dicts/tuples to UTF-8 strings."""
     if isinstance(data, bytes):
         return data.decode('utf_8')
     if isinstance(data, dict):
@@ -101,7 +98,7 @@ def should_remove(torrent, seeding_days, ratio, keep_label, remove_error):
 
     if ratio != 'auto':
         ratio_f = float(ratio)
-        if torrent.get('ratio', 0) > ratio_f and ratio_f > -1:
+        if -1 < ratio_f < torrent.get('ratio', 0):
             return (True, 'ratio')
         return (False, None)
 
@@ -114,38 +111,59 @@ def should_remove(torrent, seeding_days, ratio, keep_label, remove_error):
 
 
 def remove(client, torrent_id, keep_data, dry_run):
-    """
-    remove torrent by id
-    """
+    """Remove a torrent by id (or just log it during a dry run)."""
     torrent_data_message = '' if keep_data else ' (with data)'
     if dry_run:
-        LOGGER.info("[dry-run] _NOT_ removing torrent{} by id '{}'"
-            .format(torrent_data_message, torrent_id))
+        LOGGER.info("[dry-run] _NOT_ removing torrent%s by id '%s'",
+            torrent_data_message, torrent_id)
         return
-    LOGGER.info("removing torrent{} by id '{}'".format(torrent_data_message, torrent_id))
+    LOGGER.info("removing torrent%s by id '%s'", torrent_data_message, torrent_id)
     removed = convert(client.call('core.remove_torrent', torrent_id, not keep_data))
     if removed is not True:
-        cleanup_and_die("something went wrong removing '{}'".format(removed))
-    LOGGER.debug("successfully removed torrent{}".format(torrent_data_message))
+        cleanup_and_die(f"something went wrong removing '{removed}'")
+    LOGGER.debug("successfully removed torrent%s", torrent_data_message)
 
 
-def main(argv=None):
-    parser = build_argparser()
-    args = parser.parse_args(argv)
+def _log_torrent_decision(torrent, reason, args):
+    """Emit the verbose log line that explains why a torrent was selected."""
+    name = torrent['name']
+    if reason == 'seeding_days':
+        seeding = torrent['seeding_time'] // (60 * 60 * 24)
+        LOGGER.info("torrent '%s' surpassed seeding cut off time (%s > %s)",
+            name, seeding, args.days)
+        LOGGER.debug(torrent)
+        LOGGER.debug("torrent added '%s'", time.ctime(torrent['time_added']))
+        seeding_str = str(timedelta(seconds=torrent['seeding_time']))
+        LOGGER.debug("seeding time %s", f"{seeding_str:0>8}")
+    elif reason == 'ratio':
+        LOGGER.info("torrent '%s' surpassed minimum ratio (%s > %s)",
+            name, torrent['ratio'], args.ratio)
+        LOGGER.debug(torrent)
+    elif reason == 'stop_ratio':
+        LOGGER.info("torrent '%s' surpassed stop_ratio (%s > %s)",
+            name, torrent['ratio'], torrent['stop_ratio'])
+        LOGGER.debug(torrent)
+    elif reason == 'stop_ratio_ignored':
+        LOGGER.debug("torrent '%s' surpassed stop_ratio (%s > %s) but stop_at_ratio is set to %s",
+            name, torrent['ratio'], torrent['stop_ratio'], torrent.get('stop_at_ratio'))
+        LOGGER.debug(torrent)
 
-    levels = [logging.WARNING, logging.INFO, logging.DEBUG]
-    level = levels[min(len(levels) - 1, args.verbose)]
-    coloredlogs.install(level=level)
 
+def _validate_required_args(parser, args):
+    """Ensure host/port/user/password are present, otherwise die."""
     for var in ['host', 'port', 'user', 'password']:
         value = vars(args).get(var)
         if value:
             display = '***' if var == 'password' else value
-            LOGGER.debug("{} set to {}".format(var, display))
+            LOGGER.debug("%s set to %s", var, display)
         else:
             parser.print_help(sys.stderr)
-            cleanup_and_die("argument '--{}' is required, specify through ENV or CLI".format(var))
+            cleanup_and_die(f"argument '--{var}' is required, specify through ENV or CLI")
 
+
+def _connect(args):
+    """Build a DelugeRPCClient, connect, and return it (or die)."""
+    # pylint: disable=import-outside-toplevel
     try:
         from deluge_client import DelugeRPCClient
     except ImportError:
@@ -156,7 +174,7 @@ def main(argv=None):
 
     try:
         client.connect()
-    except Exception as exc:
+    except Exception as exc:  # pylint: disable=broad-exception-caught
         if 'BadLoginError' in str(exc):
             cleanup_and_die("wrong password supplied")
         else:
@@ -168,6 +186,21 @@ def main(argv=None):
         LOGGER.warning(client)
         cleanup_and_die("failed to connect")
 
+    return client
+
+
+def main(argv=None):
+    """Entry point: parse args, connect, walk torrents, remove eligible ones."""
+    parser = build_argparser()
+    args = parser.parse_args(argv)
+
+    levels = [logging.WARNING, logging.INFO, logging.DEBUG]
+    level = levels[min(len(levels) - 1, args.verbose)]
+    coloredlogs.install(level=level)
+
+    _validate_required_args(parser, args)
+    client = _connect(args)
+
     torrents = convert(client.call('core.get_torrents_status', {}, {}))
 
     for torrent_id, torrent in torrents.items():
@@ -176,30 +209,9 @@ def main(argv=None):
             ratio=args.ratio,
             keep_label=args.keep_label,
             remove_error=args.remove_error)
+        _log_torrent_decision(torrent, reason, args)
         if not decision:
-            if reason == 'stop_ratio_ignored':
-                LOGGER.debug("torrent '{}' surpassed stop_ratio ({} > {}) "
-                    "but stop_at_ratio is set to {}".format(
-                        torrent['name'], torrent['ratio'],
-                        torrent['stop_ratio'], torrent.get('stop_at_ratio')))
-                LOGGER.debug(torrent)
             continue
-        if reason == 'seeding_days':
-            seeding = torrent['seeding_time'] // (60 * 60 * 24)
-            LOGGER.info("torrent '{}' surpassed seeding cut off time ({} > {})".format(
-                torrent['name'], seeding, args.days))
-            LOGGER.debug(torrent)
-            LOGGER.debug("torrent added '{}'".format(time.ctime(torrent['time_added'])))
-            LOGGER.debug("seeding time {:0>8}".format(
-                str(timedelta(seconds=torrent['seeding_time']))))
-        elif reason == 'ratio':
-            LOGGER.info("torrent '{}' surpassed minimum ratio ({} > {})".format(
-                torrent['name'], torrent['ratio'], args.ratio))
-            LOGGER.debug(torrent)
-        elif reason == 'stop_ratio':
-            LOGGER.info("torrent '{}' surpassed stop_ratio ({} > {})".format(
-                torrent['name'], torrent['ratio'], torrent['stop_ratio']))
-            LOGGER.debug(torrent)
         remove(client, torrent_id,
             keep_data=args.keep_data,
             dry_run=args.dry_run)

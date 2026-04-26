@@ -1,3 +1,4 @@
+"""pytest config: ensure project root is importable so tests can `import main`."""
 import os
 import sys
 

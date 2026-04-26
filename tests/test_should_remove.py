@@ -1,3 +1,5 @@
+"""Tests for the should_remove() per-torrent decision function."""
+# pylint: disable=missing-function-docstring
 import pytest
 
 from main import should_remove
@@ -19,7 +21,7 @@ def make_torrent(**overrides):
     return base
 
 
-DEFAULTS = dict(seeding_days=25, ratio="auto", keep_label="keep", remove_error=False)
+DEFAULTS = {"seeding_days": 25, "ratio": "auto", "keep_label": "keep", "remove_error": False}
 
 
 def call(torrent, **overrides):

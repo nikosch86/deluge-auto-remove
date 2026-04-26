@@ -1,3 +1,5 @@
+"""Tests for the small helper functions in main.py."""
+# pylint: disable=missing-function-docstring,missing-class-docstring,too-few-public-methods
 import logging
 
 import pytest
@@ -70,7 +72,7 @@ def test_remove_dry_run_does_not_call_client(caplog):
     client = FakeClient()
     with caplog.at_level(logging.INFO):
         remove(client, "abc", keep_data=False, dry_run=True)
-    assert client.calls == []
+    assert not client.calls
     assert "[dry-run]" in caplog.text
     assert "(with data)" in caplog.text
 

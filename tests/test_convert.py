@@ -1,3 +1,5 @@
+"""Tests for the convert() byte/dict/tuple decoder."""
+# pylint: disable=missing-function-docstring
 from main import convert
 
 

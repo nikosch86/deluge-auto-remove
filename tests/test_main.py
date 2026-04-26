@@ -1,3 +1,6 @@
+"""End-to-end tests for main() driving a fake DelugeRPCClient."""
+# pylint: disable=missing-function-docstring,missing-class-docstring
+# pylint: disable=redefined-outer-name,unused-argument,too-many-instance-attributes
 import logging
 import sys
 import types
@@ -35,7 +38,7 @@ class FakeDelugeRPCClient:
         if method == "core.remove_torrent":
             self.removed.append(args)
             return True
-        raise AssertionError("unexpected method {}".format(method))
+        raise AssertionError(f"unexpected method {method}")
 
 
 @pytest.fixture(autouse=True)
@@ -88,15 +91,6 @@ def test_main_bad_login_exits(fake_deluge_client, monkeypatch, caplog):
         with pytest.raises(SystemExit):
             main_module.main(CONNECT_ARGS)
     assert "wrong password" in caplog.text
-
-
-def test_main_removes_torrent_over_seeding_days(fake_deluge_client):
-    main_module.main(CONNECT_ARGS + ["--days", "10"])
-    client = FakeDelugeRPCClient.instances[-1]
-    # default torrent dict from a fresh fake client has no torrents — install one
-    # via a second pass: we need to set torrents BEFORE main runs, so use a
-    # pre-seeded fake client instead.
-    assert client.torrents == {}
 
 
 def _seeded_client_factory(torrents):
